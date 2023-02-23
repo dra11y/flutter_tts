@@ -146,40 +146,36 @@ public class FlutterTtsPlugin: NSObject, FlutterPlugin, AVSpeechSynthesizerDeleg
     var failed = false
     let utterance = AVSpeechUtterance(string: text)
 
-    if #available(iOS 13.0, *) {
-      self.synthesizer.write(utterance) { (buffer: AVAudioBuffer) in
-        guard let pcmBuffer = buffer as? AVAudioPCMBuffer else {
-            NSLog("unknow buffer type: \(buffer)")
+  self.synthesizer.write(utterance) { (buffer: AVAudioBuffer) in
+    guard let pcmBuffer = buffer as? AVAudioPCMBuffer else {
+        NSLog("unknow buffer type: \(buffer)")
+        failed = true
+        return
+    }
+    if pcmBuffer.frameLength == 0 {
+        // finished
+    } else {
+      // append buffer to file
+      let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent(fileName)
+      NSLog("Saving utterance to file: \(fileURL.absoluteString)")
+        
+      if output == nil {
+        do {
+          output = try AVAudioFile(
+          forWriting: fileURL,
+          settings: pcmBuffer.format.settings,
+          commonFormat: .pcmFormatFloat32,
+          interleaved: false)
+        } catch {
+            NSLog(error.localizedDescription)
             failed = true
             return
         }
-        if pcmBuffer.frameLength == 0 {
-            // finished
-        } else {
-          // append buffer to file
-          let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent(fileName)
-          NSLog("Saving utterance to file: \(fileURL.absoluteString)")
-            
-          if output == nil {
-            do {
-              output = try AVAudioFile(
-              forWriting: fileURL,
-              settings: pcmBuffer.format.settings, 
-              commonFormat: .pcmFormatFloat32,
-              interleaved: false)
-            } catch {
-                NSLog(error.localizedDescription)
-                failed = true
-                return
-            }
-          }
-            
-          try! output!.write(from: pcmBuffer)
-        }
       }
-    } else {
-        result("Unsupported iOS version")
+        
+      try! output!.write(from: pcmBuffer)
     }
+  }
     if failed {
         result(0)
     }
@@ -257,34 +253,43 @@ public class FlutterTtsPlugin: NSObject, FlutterPlugin, AVSpeechSynthesizerDeleg
   }
 
   private func getVoices(result: FlutterResult) {
-    if #available(iOS 9.0, *) {
       let voices = NSMutableArray()
       var voiceDict: [String: String] = [:]
+      let speechVoices = AVSpeechSynthesisVoice.speechVoices()
+      if !speechVoices.contains(where: { voice in
+          voice.name == "Alex"
+      }) {
+          voiceDict["name"] = "Alex"
+          voiceDict["locale"] = "en-US"
+          voices.add(voiceDict)
+      }
       for voice in AVSpeechSynthesisVoice.speechVoices() {
         voiceDict["name"] = voice.name
         voiceDict["locale"] = voice.language
         voices.add(voiceDict)
       }
       result(voices)
-    } else {
-      // Since voice selection is not supported below iOS 9, make voice getter and setter
-      // have the same bahavior as language selection.
-      getLanguages(result: result)
-    }
   }
 
   private func setVoice(voice: [String:String], result: FlutterResult) {
-    if #available(iOS 9.0, *) {
-      if let voice = AVSpeechSynthesisVoice.speechVoices().first(where: { $0.name == voice["name"]! && $0.language == voice["locale"]! }) {
-        self.voice = voice
-        self.language = voice.language
+      guard let voice = voice.first else {
+          result(0)
+          return
+      }
+      if let speechVoice = AVSpeechSynthesisVoice.speechVoices().first(where: { $0.name == voice.key && $0.language == voice.value }) {
+        self.voice = speechVoice
+        self.language = speechVoice.language
         result(1)
         return
+      } else if voice.key == "Alex",
+         let alex = AVSpeechSynthesisVoice(identifier: AVSpeechSynthesisVoiceIdentifierAlex)
+      {
+          self.voice = alex
+          self.language = "en-US"
+          result(1)
+          return
       }
       result(0)
-    } else {
-      setLanguage(language: voice["name"]!, result: result)
-    }
   }
 
   public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
